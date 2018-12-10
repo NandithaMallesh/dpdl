@@ -45,12 +45,38 @@ class PatientsController < ApplicationController
   def show
     @diagnosed_disorders = @patient.get_selected_disorders
     @detected_disorders = @patient.get_detected_disorders
-    @gene = @patient.pedia.limit(10).order("pedia_score DESC")
-    @causing_muts = @patient.disease_causing_mutations
-    result_link = @patient.result_figures.take
-    if !result_link.nil?
-      @result_link = result_link.link.split('/')[-1]
+    #@gene = @patient.pedia.order("pedia_score DESC")
+    pedia_service = @patient.pedia_services.last
+    if pedia_service.nil?
+      @gene = @patient.pedia.order("pedia_score DESC")
+      if @gene.count > 0
+        gon.results = get_pedia_json(@gene)
+      end
+    else
+      @gene = pedia_service.pedia.order("pedia_score DESC")
+      gon.results = get_pedia_json(@gene)
     end
+    @causing_muts = @patient.disease_causing_mutations
+  end
+
+  def get_pedia_json(results)
+    pedia = []
+    results.each do |result|
+      gene = result.gene
+      label = result.label
+      if label.nil?
+        label = 0
+      end
+      tmp = {entrez_id: gene.entrez_id,
+             pedia_score: result.pedia_score,
+             gene_symbol: gene.name,
+             label: label,
+             pos: gene.pos,
+             chr: gene.chr
+            }
+      pedia.push(tmp)
+    end
+    return pedia
   end
 
   def get_img
@@ -132,21 +158,29 @@ class PatientsController < ApplicationController
         format.json { render json: @patient.errors, status: :unprocessable_entity }
       end
     end
-
-    #end
   end
 
   # PATCH/PUT /patients/1
   # PATCH/PUT /patients/1.json
   def update
     if params[:file]
-      name = params[:file].original_filename
-      dirname = File.join('Data/upload_vcf', @patient.case_id.to_s)
-      unless File.directory?(dirname)
-        FileUtils.mkdir_p(dirname)
+      dirname = File.join('Data', 'Received_VcfFiles', @patient.case_id.to_s)
+      dir = "#{Rails.root}/#{dirname}"
+      FileUtils.mkdir(dir) unless File.directory?(dir)
+      fname = params[:file].original_filename
+      f = "#{dir}/#{fname}"
+      vcf = UploadedVcfFile.find_by(patient_id: @patient.id, file_name: fname)
+      if vcf.nil?
+        FileUtils.cp_r(params[:file].tempfile.path, f)
+        vcf = UploadedVcfFile.create(patient_id: @patient.id, file_name: fname, user_id: current_user.id)
+      else
+        # check if VCF file is different from the original one
+        unless FileUtils.compare_file(f, params[:file].tempfile.path)
+          vcf.updated_at = Time.now.to_datetime
+          FileUtils.cp_r(params[:file].tempfile.path, f)
+        end
       end
-      path = File.join(dirname, name)
-      File.open(path, "wb") { |f| f.write(params[:file].read) }
+      vcf.save
     end
     if usi_params
       usi = UsiMaterialnr.find_or_create_by(patient_id: @patient.id)
@@ -173,6 +207,16 @@ class PatientsController < ApplicationController
       format.html { redirect_to patients_url, notice: 'Patient was successfully destroyed.' }
       format.json { head :no_content }
     end
+  end
+
+  def download_vcf
+    name = File.basename(params[:name])
+    ext = File.extname(params[:name])
+    send_file(
+      File.join(params[:name]),
+      filename: name,
+      type: "application/" + ext
+    )
   end
 
   private

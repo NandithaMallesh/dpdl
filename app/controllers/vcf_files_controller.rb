@@ -31,7 +31,7 @@ class VcfFilesController < ApplicationController
     alerts = ""
     ActiveRecord::Base.transaction do
       if fname =~ /zip$/
-        tdir = File.join( VcfFile::VCF_PATH, fname )
+        tdir = File.join(VcfFile::VCF_PATH, fname)
         zipfile = params[:upload]['datafile'].tempfile.path
         FileUtils.rmtree(tdir)
         Dir.mkdir(tdir, 0700)
@@ -164,9 +164,10 @@ class VcfFilesController < ApplicationController
   #########################VVVVVVVVVV
   def show
     #@current_login = current_user.login
-    @user = current_user 
+    @user = current_user
     @vcf_id = params[:id]
     @vcf = VcfFile.find(@vcf_id)
+    puts @vcf.id
 
     gon.vcf_id = @vcf_id
     @name_indiv = @name_indiv_file
@@ -191,9 +192,13 @@ class VcfFilesController < ApplicationController
 
   def get_pshow_var(vcf_id)
     @vcf_file = VcfFile.find_by_id(vcf_id)
-    @p_vcf = @vcf_file.patients_vcf_files.take
+    @p_vcf = @vcf_file.patients_vcf_files.last
     @patient = @vcf_file.patients.take
-    @pedia = @patient.pedia.limit(10).order("pedia_score DESC")
+    if @patient.pedia_services.count > 0
+      @pedia = @patient.pedia_services.last.pedia.limit(10).order("pedia_score DESC")
+    else
+      @pedia = @patient.pedia.limit(10).order("pedia_score DESC")
+    end
     flash[:alert] = "VCF File not found" and redirect_to vcf_select_path and return if @p_vcf.blank?
 
     @var_count = 0
@@ -201,14 +206,12 @@ class VcfFilesController < ApplicationController
     gene_array = []
     score_hash = {}
     @pedia.each do |pedia_gene|
-      gene_id = pedia_gene.gene_id 
+      gene_id = pedia_gene.gene_id
       gene_array.push(gene_id)
       score_hash[gene_id.to_i] = pedia_gene.pedia_score
     end
-    mut_scores = @p_vcf.disorders_mutations_scores.where('gene_id IN (?)', gene_array).group_by(&:position_id)
-    alert = ''
-    mut_scores.each do |lines|
-      line_group = lines[1]
+    mut_scores = @p_vcf.disorders_mutations_scores.where('gene_id IN (?)', gene_array)
+    mut_scores.each do |line|
       gt_array = []
       pos = ''
       snp_id = ''
@@ -221,50 +224,48 @@ class VcfFilesController < ApplicationController
       mut_ids = []
       gene_id = 0
       cs_score = 0
-      line_group.each do |line|
-        mut_pos = line.mutations_position
-        mut_ids << mut_pos.id
-        position = mut_pos.position
-        max_score = mut_pos.max_classification
-        if max_score and max_score > cs_score
-          cs_score = max_score
-        end
 
-        mut = mut_pos.mutation
-        gene_mut = mut_pos.genes_mutations.take
-        snp = mut_pos.dbsnps.take
-        gene_id = line.gene_id
-        pos = "#{VcfTools.chrom_to_s(position.chr)}:#{position.pos}"
-        gene_name = Gene.find(line.gene_id).name
-        pedia_score = score_hash[line.gene_id].round(3)
-        ref = mut.ref
-        snp_id = ''
-        effect = gene_mut.effect
-        score = line.value.round(2)
-        mut_pos.mutations_hgvs_codes.each do |value|
-          hgvs_array.push(value.hgvs_code)
-        end
-        if !snp.nil?
-          snp_id = snp.snp_id
-        end
-        gt = line.genotype
-        if gt.include? '|'
-          gt = gt.split('|')
-        elsif gt.include? '/'
-          gt = gt.split('/')
-        end
-        gt.each do |value|
-          if value == '0'
-            gt_array.push(mut.ref)
-          else
-            gt_array.push(mut.alt)
-          end
+      mut_pos = line.mutations_position
+      mut_ids << mut_pos.id
+      position = mut_pos.position
+      max_score = mut_pos.max_classification
+      if max_score && max_score > cs_score
+        cs_score = max_score
+      end
+
+      mut = mut_pos.mutation
+      gene_mut = mut_pos.genes_mutations.take
+      snp = mut_pos.dbsnps.take
+      gene_id = line.gene_id
+      pos = "#{VcfTools.chrom_to_s(position.chr)}:#{position.pos}"
+      gene_name = Gene.find(line.gene_id).name
+      pedia_score = score_hash[line.gene_id].round(3)
+      ref = mut.ref
+      snp_id = ''
+      effect = gene_mut.effect
+      score = line.value.round(2)
+      mut_pos.mutations_hgvs_codes.each do |value|
+        hgvs_array.push(value.hgvs_code)
+      end
+      if !snp.nil?
+        snp_id = snp.snp_id
+      end
+      gt = line.genotype
+      if gt.include? '|'
+        gt = gt.split('|')
+      elsif gt.include? '/'
+        gt = gt.split('/')
+      end
+      gt.each do |value|
+        if value == '0'
+          gt_array.push(mut.ref)
+        elsif value == '2'
+          gt_array.push(mut.ref)
+        else
+          gt_array.push(mut.alt)
         end
       end
-      gt_array = gt_array.uniq
-      if gt_array.length == 1
-        gt_array.push(gt_array[0])
-      end
+
       genotype = gt_array.join('/')
       a = {
         g: genotype,

@@ -4,11 +4,14 @@ class User < ApplicationRecord
   devise :database_authenticatable, :registerable,
     :recoverable, :rememberable, :trackable, :validatable
   has_many :vcf_files
+  has_many :uploaded_vcf_files
   has_many :users_patients
   has_many :patients, :through => :users_patients
   has_many :members
   has_many :groups, :through => :members
   has_many :annotations
+  has_many :pedia_services
+  has_many :downloads
   after_create :send_admin_mail
   validates :institute, :presence => true
   validates :last_name, :presence => true
@@ -23,6 +26,8 @@ class User < ApplicationRecord
   attr_accessor :login
   validate :validate_username
   after_create :assign_default_patients
+
+
 
 
   def validate_username
